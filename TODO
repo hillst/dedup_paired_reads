@@ -1,3 +1,17 @@
-# Update makefile to have a more comprehensive build system
+####### UPDATED 10-4-2016
 
-# Try to auto-adjust dedup size so we can manage memory more efficiently.
+
+1) Need a way to adapt to system memory
+    - Better datatype usage (4 bits for a nucleotide, 128 for qual...)
+    - Roll your own dynamic arrays that are smarter
+    - Do some probabilstic flushing of data when we hit memory cap
+        - What i mean is, what's the probability that I'll observe duplications for given reads basedo n what i've seen ? if it's low, print it out and move on, do this for all until we are okay wrt memory
+        - actually we can use a hard array if we can compute how much to pre-allocate
+
+2) Needs to be adjusted for UMI/single cell analysis (new duplication rules)
+    - Read 1 and Read 2 match
+    - UMI is not unique
+    - Cell is not unique
+    - Basically, has R1 and R2 been exactly observed in this cell and with this UMI before
+        - We can do smart filtering based on this (filter based on UMI + cell bc)
+        - actually can we just look at the cellbc and UMI for this?

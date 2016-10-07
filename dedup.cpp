@@ -26,11 +26,14 @@
  *      2) Change our start size lol
  *      3) This needsa getops module or something to help the user, right now it only supports ONE file. and we want it to support many
  *
+ *      4) UMI support
+ *
  */
 
 void deduplicate_reads(string left_reads, string right_reads){
     ifstream left(left_reads);
     ifstream right(right_reads);
+    
     string left_str;
     string right_str;
     int count = 0;
@@ -41,7 +44,8 @@ void deduplicate_reads(string left_reads, string right_reads){
     auto buffer = new vector<vector<string>>(2);
     long reads_analyzed = 0;
     long duplicated_reads = 0;
-    while(getline(left, left_str)){
+   
+     while(getline(left, left_str)){
         //ugly pointer notation, consider a macro or function to handle this mess. would make it more readable but not any more functional
         getline(right, right_str);
         if (count == 0){
@@ -71,7 +75,7 @@ void deduplicate_reads(string left_reads, string right_reads){
         if (count == 4){
             reads_analyzed++;
             if (reads_analyzed % 10000000 == 0){
-                cerr << "Reads analyzed: " << reads_analyzed * 2 << "\n";
+                cerr << "Reads analyzed: " << reads_analyzed  << "\n";
             }
             
             if (seen_read_pairs.count(merged)){
@@ -80,7 +84,7 @@ void deduplicate_reads(string left_reads, string right_reads){
                 if ( buffer_quality > current_best_quality ){
                     delete seen_read_pairs[merged];
                     seen_read_pairs[merged] = buffer;
-                    duplicated_reads+=2;
+                    duplicated_reads+=1;
                 }
             } 
             else{
@@ -95,6 +99,125 @@ void deduplicate_reads(string left_reads, string right_reads){
     cout << "duplicated_reads: " <<duplicated_reads << "\n";
     cout << "total_reads: " << reads_analyzed << "\n";
     cout << "portion duplicated: " << (float)duplicated_reads / reads_analyzed << "\n";
+}
+
+
+/**
+ * Deduplicate reads that also have a umi and cell barcode file associated with them.
+ *  Policy for deduplication is, if all four files are identical, collapse the read
+ */
+void deduplicate_reads_umi_cellbc(string left_reads, string right_reads, string i5_reads, string i7_reads){
+    ifstream left(left_reads);
+    ifstream right(right_reads);
+    ifstream i5(i5_reads);
+    ifstream i7(i7_reads);
+    
+    string left_str;
+    string right_str;
+    string i5_str;
+    string i7_str;
+
+    int count = 0;
+    string merged;
+    //map<string, vector<vector<string>> *> seen_read_pairs(HUGE_START_BIN);
+    map<string, vector<vector<string>> *> seen_read_pairs;
+    //vector<vector<string>> buffer(2);
+    auto buffer = new vector<vector<string>>(4);
+    long reads_analyzed = 0;
+    long duplicated_reads = 0;
+   
+     while(getline(left, left_str)){
+        //ugly pointer notation, consider a macro or function to handle this mess. would make it more readable but not any more functional
+        getline(right, right_str);
+        getline(i5, i5_str);
+        getline(i7, i7_str);
+
+        if (count == 0){
+            buffer = new vector<vector<string>>(4);
+        }
+        if ((count % 4) == HEADER){
+            buffer->at(LEFT).push_back(left_str);
+            buffer->at(RIGHT).push_back(right_str);
+            buffer->at(I5).push_back(i5_str);
+            buffer->at(I7).push_back(i7_str);
+        }
+        if ((count % 4) == SEQUENCE){
+            merged = left_str + i5_str + i7_str + right_str;
+            buffer->at(LEFT).push_back(left_str);
+            buffer->at(RIGHT).push_back(right_str);
+            buffer->at(I5).push_back(i5_str);
+            buffer->at(I7).push_back(i7_str);
+        }
+        if ((count % 4) == PLUS){
+            buffer->at(LEFT).push_back(left_str);
+            buffer->at(RIGHT).push_back(right_str);
+            buffer->at(I5).push_back(i5_str);
+            buffer->at(I7).push_back(i7_str);
+        }
+        if ((count % 4) == QUAL){
+            buffer->at(LEFT).push_back(left_str);
+            buffer->at(RIGHT).push_back(right_str);
+            buffer->at(I5).push_back(i5_str);
+            buffer->at(I7).push_back(i7_str);
+        }
+         
+        count++;
+        int current_best_quality = 0;
+        int buffer_quality = 0;
+        if (count == 4){
+            reads_analyzed++;
+            if (reads_analyzed % 10000000 == 0){
+                cerr << "Read pairs analyzed: " << reads_analyzed  << "\n";
+            }
+            
+            if (seen_read_pairs.count(merged)){
+                current_best_quality = get_qual(seen_read_pairs[merged]->at(LEFT)[QUAL]) +  get_qual(seen_read_pairs[merged]->at(RIGHT)[QUAL]);
+                buffer_quality = get_qual(buffer->at(LEFT)[QUAL]) + get_qual(buffer->at(RIGHT)[QUAL]);
+                if ( buffer_quality > current_best_quality ){
+                    delete seen_read_pairs[merged];
+                    seen_read_pairs[merged] = buffer;
+                    duplicated_reads+=1;
+                }
+            } 
+            else{
+                seen_read_pairs[merged] = buffer;
+            }
+            count = 0;
+        }
+    }
+    left.close();
+    right.close();
+    i5.close();
+    i7.close();
+    print_fastq_umi_cellbc(&seen_read_pairs, "dedup." + left_reads , "dedup." +right_reads, "dedup." + i5_reads, "dedup." + i7_reads);
+    cout << "duplicated_reads: " <<duplicated_reads << "\n";
+    cout << "total_reads: " << reads_analyzed << "\n";
+    cout << "portion duplicated: " << (float)duplicated_reads / reads_analyzed << "\n";
+
+}
+
+void print_fastq_umi_cellbc(map<string, vector<vector<string>> * > * fastq_table, string left_reads, string right_reads, string i5_reads, string i7_reads){
+    ofstream left_out(left_reads);
+    ofstream right_out(right_reads);
+    ofstream i5_out(i5_reads);
+    ofstream i7_out(i7_reads);
+    //second refers to value, first refers to key
+    for ( auto it = fastq_table->begin(); it != fastq_table->end(); ++it  ){
+        for (int i = 0; i < 4; i++){
+            left_out << it->second->at(LEFT)[i] << "\n";
+        }
+        for (int i = 0; i < 4; i++){
+            right_out << it->second->at(RIGHT)[i] << "\n";
+        }
+        for (int i = 0; i < 4; i++){
+            i5_out << it->second->at(I5)[i] << "\n";
+        }
+        for (int i = 0; i < 4; i++){
+            i7_out << it->second->at(I7)[i] << "\n";
+        }
+    }
+    left_out.close();
+    right_out.close();
 }
 
 /* Prints the paired fastq files in the associated hash map */
@@ -136,10 +259,16 @@ int main(int argc, char *argv[]){
     //map<string, int> months();
     if (argc < 3){
         cerr << "USAGE:" << "\n";
-        cerr << "dedup\t<LEFT.fa>\t<RIGHT.fa>\n";
+        cerr << "dedup\t<LEFT.fa>\t<RIGHT.fa>\t[I5.fa\tI7.fa]\n";
         return -1;
     }
     string left_reads = argv[1];
     string right_reads = argv[2];
-    deduplicate_reads(left_reads, right_reads); 
+    if (argc == 5){
+        string i5_reads = argv[3];
+        string i7_reads = argv[4];
+        deduplicate_reads_umi_cellbc(left_reads, right_reads, i5_reads, i7_reads); 
+    } else{
+        deduplicate_reads(left_reads, right_reads); 
+    }
 }
